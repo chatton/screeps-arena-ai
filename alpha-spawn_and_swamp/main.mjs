@@ -1,10 +1,23 @@
-import {getObjectsByPrototype, findClosestByPath, getTicks} from 'game/utils';
+import {getObjectsByPrototype, findClosestByPath, findInRange} from 'game/utils';
 import {StructureSpawn, Creep, StructureContainer} from 'game/prototypes';
-import {MOVE, WORK, CARRY, ATTACK, RESOURCE_ENERGY, ERR_NOT_IN_RANGE, RANGED_ATTACK, HEAL, TOUGH} from 'game/constants';
+import {
+    MOVE,
+    WORK,
+    CARRY,
+    RESOURCE_ENERGY,
+    ERR_NOT_IN_RANGE,
+    RANGED_ATTACK,
+    HEAL
+} from 'game/constants';
 import {} from 'arena';
 
 const ROLE_HARVESTER = "harvester";
 const ROLE_RANGED_ATTACKER = "ranged_attacker";
+const ROLE_HEALER = "healer";
+
+const numHarvesters = 3;
+const numHealers = 3;
+
 
 // spawnStateMachine is the state machine which controls spawning of units, it must be initialized in the first tick.
 let spawnStateMachine;
@@ -15,14 +28,16 @@ function initSpawnStateMachine() {
     const spawn = getObjectsByPrototype(StructureSpawn).find(s => s.my);
 
     const sm = new StateMachine();
-    sm.setStateTransition("harvester state", () => getObjectsByPrototype(Creep).filter(c => c.my && c.job === ROLE_HARVESTER).length < 3, new SpawnStateHarvester(spawn))
+    sm.setStateTransition("harvester state", () => getObjectsByPrototype(Creep).filter(c => c.my && c.job === ROLE_HARVESTER).length < numHarvesters, new SpawnStateHarvester(spawn))
+    sm.setStateTransition("healer state", () => getObjectsByPrototype(Creep).filter(c => c.my && c.job === ROLE_HEALER).length < numHealers && getObjectsByPrototype(Creep).filter(c => c.my && c.job === ROLE_RANGED_ATTACKER).length > 2, new SpawnStateHealer(spawn))
     sm.setStateTransition("ranged attacker state", () => true, new SpawnStateRangedAttacker(spawn))
     return sm;
 }
 
 function initCreepStateMachine() {
     const sm = new StateMachine();
-    sm.setStateTransition("gather initial resources", () => true, new CreepStateGatherInitialResources());
+    sm.setStateTransition("attack enemy base", () => getObjectsByPrototype(Creep).filter(c => c.my).length >= 8, new CreepAttackEnemyBase());
+    sm.setStateTransition("gather initial resources", () => true, new CreepStateGatherInitialResourcesAndDefend());
     return sm;
 }
 
@@ -57,19 +72,30 @@ class SpawnStateHarvester extends SpawnState {
 // SpawnStateRangedAttacker spawns ranged attackers.
 class SpawnStateRangedAttacker extends SpawnState {
     tick() {
-        const c = this.spawn.spawnCreep([MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, RANGED_ATTACK, RANGED_ATTACK]).object;
+        const c = this.spawn.spawnCreep([MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, RANGED_ATTACK, RANGED_ATTACK]).object;
         if (c) {
             c.job = ROLE_RANGED_ATTACKER;
         }
     }
 }
 
-class CreepStateGatherInitialResources {
+// SpawnStateHealer spawns healers.
+class SpawnStateHealer extends SpawnState {
     tick() {
+        const c = this.spawn.spawnCreep([MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, HEAL, HEAL]).object;
+        if (c) {
+            c.job = ROLE_HEALER;
+        }
+    }
+}
 
+class CreepStateGatherInitialResourcesAndDefend {
+    tick() {
+        const myCreeps = getObjectsByPrototype(Creep).filter(c => c.my);
         const spawn = getObjectsByPrototype(StructureSpawn).find(s => s.my);
         const harvesters = getObjectsByPrototype(Creep).filter(c => c.my && c.job === ROLE_HARVESTER);
         const rangedAttackers = getObjectsByPrototype(Creep).filter(c => c.my && c.job === ROLE_RANGED_ATTACKER);
+        const healers = getObjectsByPrototype(Creep).filter(c => c.my && c.job === ROLE_HEALER);
         const enemyCreeps = getObjectsByPrototype(Creep).filter(c => !c.my);
         const containers = getObjectsByPrototype(StructureContainer).filter(c => c.store[RESOURCE_ENERGY] <= c.store.getCapacity() && c.store[RESOURCE_ENERGY] !== 0);
         const enemySpawn = getObjectsByPrototype(StructureSpawn).find(s => !s.my);
@@ -97,10 +123,79 @@ class CreepStateGatherInitialResources {
 
         // handler ranged attackers.
         for (let rangedAttacker of rangedAttackers) {
+            // simply attack anybody that is in range, don't go after the spawn yet.
+            const closestEnemies = findInRange(rangedAttacker, enemyCreeps, 5);
+            if (closestEnemies.length > 0) {
+                const closestEnemy = findClosestByPath(rangedAttacker, closestEnemies);
+                rangedAttacker.rangedAttack(closestEnemy)
+            }
+        }
+
+        // heal anything that is damaged.
+        for (const healer of healers) {
+            const closestHealTarget = findClosestByPath(healer, myCreeps.concat(spawn).filter(c => c.hits < c.hitsMax))
+            if (closestHealTarget && closestHealTarget.hits < closestHealTarget.hitsMax) {
+                if (healer.heal(closestHealTarget) === ERR_NOT_IN_RANGE) {
+                    healer.moveTo(closestHealTarget)
+                }
+            }
+        }
+    }
+}
+
+
+class CreepAttackEnemyBase {
+    tick() {
+        const myCreeps = getObjectsByPrototype(Creep).filter(c => c.my);
+        const spawn = getObjectsByPrototype(StructureSpawn).find(s => s.my);
+        const harvesters = getObjectsByPrototype(Creep).filter(c => c.my && c.job === ROLE_HARVESTER);
+        const rangedAttackers = getObjectsByPrototype(Creep).filter(c => c.my && c.job === ROLE_RANGED_ATTACKER);
+        const healers = getObjectsByPrototype(Creep).filter(c => c.my && c.job === ROLE_HEALER);
+        const enemyCreeps = getObjectsByPrototype(Creep).filter(c => !c.my);
+        const containers = getObjectsByPrototype(StructureContainer).filter(c => c.store[RESOURCE_ENERGY] <= c.store.getCapacity() && c.store[RESOURCE_ENERGY] !== 0);
+        const enemySpawn = getObjectsByPrototype(StructureSpawn).find(s => !s.my);
+
+        // handler harvesters.
+        for (let harvester of harvesters) {
+            // find closest container in case we end up on the other side of the map.
+            const container = findClosestByPath(harvester, containers);
+
+            if (harvester.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                // if there are no containers around, there's no energy to collect.
+                if (!container) {
+                    continue;
+                }
+
+                if (harvester.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                    harvester.moveTo(container);
+                }
+            } else {
+                if (harvester.transfer(spawn, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                    harvester.moveTo(spawn);
+                }
+            }
+        }
+
+        // handler ranged attackers.
+        for (let rangedAttacker of rangedAttackers) {
+            // simply attack anybody that is in range, don't go after the spawn yet.
             const closestEnemy = findClosestByPath(rangedAttacker, enemyCreeps);
             const target = closestEnemy === null ? enemySpawn : closestEnemy;
             if (rangedAttacker.rangedAttack(target) === ERR_NOT_IN_RANGE) {
                 rangedAttacker.moveTo(target);
+            }
+        }
+
+        // heal anything that is damaged.
+        for (const healer of healers) {
+            const closestHealTarget = findClosestByPath(healer, rangedAttackers.filter(c => c.hits < c.hitsMax))
+            if (closestHealTarget) {
+                if (healer.heal(closestHealTarget) === ERR_NOT_IN_RANGE) {
+                    healer.moveTo(closestHealTarget)
+                }
+            } else {
+                const closestHealTarget = findClosestByPath(healer, rangedAttackers);
+                healer.moveTo(closestHealTarget)
             }
         }
     }
