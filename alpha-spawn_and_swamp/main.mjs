@@ -7,7 +7,7 @@ import {
     RESOURCE_ENERGY,
     ERR_NOT_IN_RANGE,
     RANGED_ATTACK,
-    HEAL
+    HEAL, ATTACK
 } from 'game/constants';
 import {} from 'arena';
 
@@ -18,6 +18,11 @@ const ROLE_HEALER = "healer";
 const numHarvesters = 3;
 const numHealers = 3;
 
+// TODO: move units away from spawn when spawned.
+// TODO: build units that can build stuff. (CARRY, CARRY, WORK, MOVE, MOVE, MOVE, MOVE, MOVE), build extensions near containers (2 or 3 per energy site).
+// TODO: build ramparts to defend, build one on spawn.
+// TODO: build extension next to containers with resources.
+// TODO: group up outside of enemy base.
 
 // spawnStateMachine is the state machine which controls spawning of units, it must be initialized in the first tick.
 let spawnStateMachine;
@@ -101,6 +106,7 @@ class CreepStateGatherInitialResourcesAndDefend {
         const enemySpawn = getObjectsByPrototype(StructureSpawn).find(s => !s.my);
 
         // handler harvesters.
+        // TODO: go out and mine from other containers, but return to an extension if it exists.
         for (let harvester of harvesters) {
             // find closest container in case we end up on the other side of the map.
             const container = findClosestByPath(harvester, containers);
@@ -178,8 +184,19 @@ class CreepAttackEnemyBase {
 
         // handler ranged attackers.
         for (let rangedAttacker of rangedAttackers) {
-            // simply attack anybody that is in range, don't go after the spawn yet.
-            const closestEnemy = findClosestByPath(rangedAttacker, enemyCreeps);
+
+            // only attack enemy creeps that have attacking parts, this means we ignore going after creeps
+            // that are just workers.
+            const enemyAttackers = enemyCreeps.filter(c => {
+                for (const body of c.body) {
+                    if (body.type === ATTACK || body.type === RANGED_ATTACK) {
+                        return true;
+                    }
+                }
+                return false;
+            })
+
+            const closestEnemy = findClosestByPath(rangedAttacker, enemyAttackers);
             const target = closestEnemy === null ? enemySpawn : closestEnemy;
             if (rangedAttacker.rangedAttack(target) === ERR_NOT_IN_RANGE) {
                 rangedAttacker.moveTo(target);
@@ -206,7 +223,7 @@ class CreepAttackEnemyBase {
 class StateMachine {
     constructor() {
         this.states = [];
-        this.lastState = "";
+        this.lastState = "none";
     }
 
     setStateTransition(stateName, conditionFn, ticker) {
@@ -221,8 +238,8 @@ class StateMachine {
         for (let state of this.states) {
             if (state.conditionFn()) {
                 if (state.name !== this.lastState) {
+                    console.log(`transitioning from state state: ${this.lastState} to ${state.name}`);
                     this.lastState = state.name;
-                    console.log("executing state: " + state.name);
                 }
                 state.ticker.tick();
                 return;
