@@ -21,6 +21,7 @@ const numHealers = 3;
 // TODO: build ramparts to defend, build one on spawn.
 // TODO: build extension next to containers with resources.
 // TODO: group up outside of enemy base.
+// TODO: add kiting for ranged units.
 // TODO: hunt down buildings on the way over to enemy base. (destroy extensions)
 // TODO: claim dropped resources on the ground with harvesters once they have mined out the original three storage containers.
 
@@ -33,15 +34,16 @@ const stateMachines = [];
 const gameState = {
     // harvestInitialResources indicates if we should be harvesting the first 3 containers of resources.
     // once these are depleted, this value should be set to false, and we move on to harvesting the remote resources.
-    harvestInitialResources: true
+    harvestInitialResources: true,
+    spawn: null
 };
 
-function initSpawnStateMachine(spawn) {
+function initSpawnStateMachine() {
     const sm = new StateMachine("spawn");
-    sm.setStateTransition("harvester state", () => getCreepsWithRole(ROLE_HARVESTER).length < numHarvesters, new SpawnStateHarvester(spawn))
+    sm.setStateTransition("harvester state", () => getCreepsWithRole(ROLE_HARVESTER).length < numHarvesters, new SpawnStateHarvester())
     // sm.setStateTransition("builder state", () => getCreepsWithRole(ROLE_BUILDER).length < numBuilders, new SpawnStateBuilder(spawn, ROLE_BUILDER))
-    sm.setStateTransition("healer state", () => getCreepsWithRole(ROLE_HEALER).length < numHealers && getCreepsWithRole(ROLE_RANGED_ATTACKER).length > 2, new SpawnStateHealer(spawn))
-    sm.setStateTransition("ranged attacker state", () => true, new SpawnStateRangedAttacker(spawn))
+    sm.setStateTransition("healer state", () => getCreepsWithRole(ROLE_HEALER).length < numHealers && getCreepsWithRole(ROLE_RANGED_ATTACKER).length > 2, new SpawnStateHealer())
+    sm.setStateTransition("ranged attacker state", () => true, new SpawnStateRangedAttacker())
     return sm;
 }
 
@@ -69,11 +71,10 @@ function initHealerStateMachine() {
 }
 
 export function loop() {
-    console.log(gameState);
     if (stateMachines.length === 0) {
-        const spawn = getObjectsByPrototype(StructureSpawn).find(s => s.my);
+        gameState.spawn = getObjectsByPrototype(StructureSpawn).find(s => s.my);
         stateMachines.push(
-            initSpawnStateMachine(spawn),
+            initSpawnStateMachine(),
             initHarvesterStateMachine(),
             initRangedAttackerStateMachine(),
             initHealerStateMachine()

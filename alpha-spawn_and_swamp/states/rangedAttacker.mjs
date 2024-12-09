@@ -6,7 +6,7 @@ import {ROLE_RANGED_ATTACKER} from "../constants/constants.mjs";
 
 // StateRangedAttackersAttackEnemyBase is the state where the ranged attackers will attack the enemy base.
 export class StateRangedAttackersAttackEnemyBase {
-    tick(gameState) {
+    tick() {
         const rangedAttackers = getCreepsWithRole(ROLE_RANGED_ATTACKER);
         const enemyCreeps = getObjectsByPrototype(Creep).filter(c => !c.my);
         const enemySpawn = getObjectsByPrototype(StructureSpawn).find(s => !s.my);

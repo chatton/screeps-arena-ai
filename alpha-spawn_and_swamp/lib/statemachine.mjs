@@ -27,5 +27,6 @@ export class StateMachine {
             }
         }
         console.log("no conditionFn returned true, invalid wiring of this state machine.");
+        console.log(gameState);
     }
 }
